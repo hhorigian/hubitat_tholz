@@ -1,0 +1,181 @@
+{
+  "localization": "English",
+  "roundedCorners": 0,
+  "dateFormat": "MM/DD/YYYY",
+  "hideLabels": true,
+  "customColors": [
+    {
+      "template": "switches",
+      "bgColor": "",
+      "iconColor": "rgb(254,196,36)",
+      "state": "on",
+      "customIcon": "he-switch_2_off_filled"
+    },
+    {
+      "template": "switches",
+      "bgColor": "",
+      "iconColor": "",
+      "state": "off",
+      "customIcon": "he-switch_2_off"
+    }
+  ],
+  "colWidth": "",
+  "cloudRefresh": 5,
+  "hsmPin": "37a6259cc0c1dae299a7866489dff0bd",
+  "hide3dot": false,
+  "clockMode": true,
+  "gridGap": 5,
+  "goBack": true,
+  "tiles": [
+    {
+      "rowSpan": 1,
+      "template": "switches",
+      "col": 1,
+      "colSpan": 2,
+      "bgImage": "",
+      "id": 2,
+      "row": 1,
+      "device": "129",
+      "templateExtra": ""
+    },
+    {
+      "rowSpan": 1,
+      "template": "switches",
+      "col": 3,
+      "colSpan": 2,
+      "bgImage": "",
+      "id": 3,
+      "row": 1,
+      "device": "130",
+      "templateExtra": ""
+    },
+    {
+      "rowSpan": 1,
+      "template": "switches",
+      "col": 1,
+      "colSpan": 2,
+      "bgImage": "",
+      "id": 4,
+      "row": 2,
+      "device": "131",
+      "templateExtra": ""
+    },
+    {
+      "rowSpan": 1,
+      "template": "switches",
+      "col": 1,
+      "colSpan": 2,
+      "bgImage": "",
+      "id": 5,
+      "row": 3,
+      "device": "128",
+      "customIcon": null,
+      "templateExtra": ""
+    },
+    {
+      "rowSpan": 1,
+      "template": "switches",
+      "col": 3,
+      "colSpan": 2,
+      "bgImage": "",
+      "id": 6,
+      "row": 2,
+      "device": "132",
+      "customIcon": "he-lightbulb",
+      "templateExtra": ""
+    },
+    {
+      "rowSpan": 1,
+      "template": "attribute",
+      "col": 1,
+      "colSpan": 1,
+      "id": 7,
+      "row": 5,
+      "device": "127",
+      "templateExtra": "temperature"
+    },
+    {
+      "rowSpan": 1,
+      "template": "attribute",
+      "col": 1,
+      "colSpan": 2,
+      "id": 8,
+      "row": 4,
+      "device": "127",
+      "templateExtra": "heat0Mode"
+    },
+    {
+      "rowSpan": 1,
+      "template": "attribute",
+      "col": 2,
+      "colSpan": 1,
+      "id": 9,
+      "row": 5,
+      "device": "127",
+      "templateExtra": "heat0Setpoint"
+    },
+    {
+      "rowSpan": 1,
+      "template": "switches",
+      "col": 3,
+      "buttonCommand": "push",
+      "colSpan": 2,
+      "id": 10,
+      "row": 3,
+      "device": "133",
+      "customIcon": null,
+      "templateExtra": "3"
+    },
+    {
+      "rowSpan": 1,
+      "template": "buttons",
+      "col": 3,
+      "colSpan": 1,
+      "id": 11,
+      "row": 5,
+      "device": "127",
+      "customIcon": "he-plus1",
+      "templateExtra": "5"
+    },
+    {
+      "rowSpan": 1,
+      "template": "buttons",
+      "col": 4,
+      "colSpan": 1,
+      "id": 12,
+      "row": 5,
+      "device": "127",
+      "customIcon": "he-minus1",
+      "templateExtra": "6"
+    },
+    {
+      "rowSpan": 1,
+      "template": "buttons",
+      "col": 3,
+      "buttonCommand": "push",
+      "colSpan": 2,
+      "id": 13,
+      "row": 4,
+      "device": "127",
+      "customIcon": "track_changes",
+      "templateExtra": "18"
+    }
+  ],
+  "bgColor": "#282828",
+  "lanRefresh": 2,
+  "modesPin": "",
+  "iconSize": "38",
+  "cols": 4,
+  "customCSS": "#tile-7 .tile-title:before { content:'Temperatura Atual'; visibility: visible; display: block; }\n#tile-7 .tile-title { visibility: hidden !important; }\n#tile-9 .tile-title:before { content:'Set Temp'; visibility: visible; display: block; }\n#tile-9 .tile-title { visibility: hidden !important; }\n#tile-8 .tile-title { visibility: hidden !important; }\n#tile-11 .tile-title:before { content:'Temp'; visibility: visible; display: block; }\n#tile-11 .tile-title { visibility: hidden !important; }\n#tile-12 .tile-title:before { content:'Temp'; visibility: visible; display: block; }\n#tile-12 .tile-title { visibility: hidden !important; }\n#tile-13 .tile-title:before { content:'Modo Aqu.'; visibility: visible; display: block; }\n#tile-13 .tile-title { visibility: hidden !important; }\n",
+  "rowHeight": "",
+  "hideEvents": false,
+  "noColors": false,
+  "tempScale": "C",
+  "readOnly": null,
+  "rows": 8,
+  "hideIconText": true,
+  "background": "/local/pool1.jpg",
+  "hideTextShadow": true,
+  "name": "Tholz",
+  "fontSize": 12
+}
