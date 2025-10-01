@@ -1,0 +1,19 @@
+{
+ "packageName":"Tholz - SmartPool",
+ "author":"Vartan Horigian",
+ "version":"1.1.0",
+ "minimumHEVersion":"2.3.7.100",
+ "dateReleased":"2025-10-01",
+ "releaseNotes":"1.1.0 - Initial release. 
+",
+ "documentationLink":"https://github.com/hhorigian/hubitat_tholz/tree/main",
+ "drivers": [
+  {
+     "id":"440e9e56-125d-4bb9-ac52-764dd0e75fea",
+     "name":"Tholz - SmartPool",
+     "namespace":"TRATO",
+     "location":"https://raw.githubusercontent.com/hhorigian/hubitat_tholz/refs/heads/main/hubitat_Tholz_SmartPool.groovy",
+     "required":true
+  }
+  ]
+}
