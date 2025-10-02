@@ -4,8 +4,7 @@
  "version":"1.1.0",
  "minimumHEVersion":"2.3.7.100",
  "dateReleased":"2025-10-01",
- "releaseNotes":"1.1.0 - Initial release. 
-",
+ "releaseNotes":"1.1.0 - Initial release.",
  "documentationLink":"https://github.com/hhorigian/hubitat_tholz/tree/main",
  "drivers": [
   {
