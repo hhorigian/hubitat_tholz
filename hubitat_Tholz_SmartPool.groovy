@@ -30,6 +30,15 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.transform.Field
 
+@Field Map PRESET_COLORS = [
+    "RED":[252, 42, 0],
+    "GREEN":[4, 252, 0],
+    "BLUE":[0, 92, 252],
+    "YELLOW":[252, 252, 0],
+    "PINK":[248, 0, 252],
+    "ORANGE":[242, 166, 22],
+    "WHITE":[255, 255, 255],
+]
 
 metadata {
     definition(name: "Tholz SmartConnect (TCP)", namespace: "TRATO", author: "VH") {
@@ -38,9 +47,9 @@ metadata {
         capability "Sensor"
         capability "Switch"
         capability "PushableButton"
-        capability "Actuator"        
-        
-        
+        capability "Actuator"
+        capability "ColorControl"   // <-- habilita tile nativo de cor no Dashboard
+		capability "SwitchLevel"     // <— para o tile chamar setLevel(level)        
 
         // Comandos utilitários
         command "reconnect"
@@ -55,38 +64,52 @@ metadata {
         // Luz simples (led0) - on/off
         command "lightsOn"
         command "lightsOff"
-
+		command "allOn"
+		command "allOff"
+        
         // --- Heatings (comandos) ---
         command "heatOn"
         command "heatOff"
         command "setHeatMode", [[name:"mode*", type:"ENUM", constraints:["Off","Ligado","Automático","Econômico","Aquecer","Resfriar"]]]
         command "setHeatSetpoint", [[name:"sp(°C)*", type:"NUMBER"]]
         command "bumpHeatSetpoint", [[name:"+/-Δ(°C)*", type:"NUMBER"]]
+        command "heatUp1C"
+        command "heatDown1C"
+        command "toggleHeatMode"
 
-		command "heatUp1C"
-        command "heatDown1C"        
+        // --- Luzes (comandos existentes + novos) ---
+        command "setLightBrightness", [[name:"brightness(0-100)*", type:"NUMBER"]]
+        command "chooseLightColor", [[name:"color*", type:"ENUM", constraints:["RED","GREEN","BLUE","YELLOW","PINK","ORANGE","WHITE"]]]
+        command "setLightRGB", [
+            [name:"R*", type:"NUMBER"],
+            [name:"G*", type:"NUMBER"],
+            [name:"B*", type:"NUMBER"]
+        ]
 
-        
         // --- Atributos de status no PAI ---
-        attribute "lights", "string"   // "on" / "off"
-        attribute "filter", "string"   // "on" / "off"
-        attribute "aux1", "string"     // "on" / "off"
-        attribute "aux2", "string"     // "on" / "off"
-        attribute "aux3", "string"     // "on" / "off"
+        attribute "lights", "string"         // "on" / "off"
+        attribute "filter", "string"         // "on" / "off"
+        attribute "aux1", "string"           // "on" / "off"
+        attribute "aux2", "string"           // "on" / "off"
+        attribute "aux3", "string"           // "on" / "off"
         // --- Heatings (atributos no PAI) ---
-        attribute "heat0Mode", "string"      // Off/Ligado/Auto/… (texto amigável)
-        attribute "heat0On", "string"        // "on"/"off"
-        attribute "heat0Setpoint", "number"  // °C
-        attribute "heat0T1", "number"        // °C (se houver)
-        attribute "heat0T2", "number"        // °C (se houver)
-        attribute "heat0Temp", "number"      // °C (sensor principal do heat0)
+        attribute "heat0Mode", "string"
+        attribute "heat0On", "string"
+        attribute "heat0Setpoint", "number"
+        attribute "heat0T1", "number"
+        attribute "heat0T2", "number"
+        attribute "heat0Temp", "number"
 
         attribute "temperature", "number"
-		command "toggleHeatMode"
-        
-        
 
-        
+        // --- Luzes (atributos extras p/ ColorControl) ---
+        attribute "lightBrightness", "number"   // 0..100
+        attribute "lightColorRGB", "string"     // "R,G,B"
+        // ColorControl padrão
+        attribute "hue", "number"               // 0..100
+        attribute "saturation", "number"        // 0..100
+        attribute "level", "number"             // 0..100
+        attribute "color", "string"             // "#RRGGBB"
     }
 
     preferences {
@@ -100,7 +123,6 @@ metadata {
 def installed() {
     logInfo "Installed"
     sendEvent(name:"numberOfButtons", value:20)
-    
 }
 
 def updated() {
@@ -129,35 +151,22 @@ def reconnect() {
     runIn(2, "connectSocket")
 }
 
-def on() {
-lightsOn()    
-filterOn()    
-aux1On()
-aux2On()    
-}
+def on()  { setLights(true)  }   // apenas luzes
+def off() { setLights(false) }   // apenas luzes
 
-def off() {
-lightsOff()
-filterOn()    
-aux1Off()    
-aux2Off()    
+def allOn()  { lightsOn(); filterOn(); aux1On(); aux2On() }
+def allOff() { lightsOff(); filterOn(); aux1Off(); aux2Off() }
 
-}
+
 private void connectSocket() {
-
-
   try {
     logInfo "Conectando em ${device_IP_address}:${device_port} ..."
-        interfaces.rawSocket.connect(device_IP_address, (int) device_port)
-      state.lastRxAt = now()
-    //setBoardStatus("online")
-
+    interfaces.rawSocket.connect(device_IP_address, (int) device_port)
+    state.lastRxAt = now()
   } catch (e) {
     logWarn "Falha ao conectar: ${e.message}"
-    //setBoardStatus("offline")
-     runIn(10, "connectSocket")  
+    runIn(10, "connectSocket")
   }
-   
 }
 
 def uninstalled() {
@@ -173,8 +182,6 @@ def getDevice() {
 }
 
 // ======== Commands de atalho (outputs) ========
-// Por padrão, o exemplo da doc usa out0..outN com campo "on"
-// Mapeamos: Filtro(id=0) -> normalmente out0; Aux1(id=10), Aux2(id=11)
 def filterOn()  { setOutputById(0, true)  }
 def filterOff() { setOutputById(0, false) }
 def aux1On()    { setOutputById(10, true) }
@@ -188,11 +195,9 @@ def lightsOff() { setLights(false) }
 def push(pushed) {
     if (pushed == null) return
     logInfo "Push ${pushed}"
-
-    // Registra evento do botão (boa prática p/ dashboards & RM)
     sendEvent(name:"pushed", value: pushed, isStateChange: true)
 
-    switch (pushed) { 
+    switch (pushed) {
         case "1":  lightsOn();                  break
         case "2":  lightsOff();                 break
         case "3":  heatOn();                    break
@@ -208,11 +213,11 @@ def push(pushed) {
         case "13": setHeatMode("Automático");   break
         case "14": setHeatMode("Ligado");       break
         case "15": setHeatMode("Off");          break
-        case "16": bumpHeatSetpoint(0.5);       break  // ajuste fino opcional (+0,5 °C)
-        case "17": bumpHeatSetpoint(-0.5);      break  // ajuste fino opcional (-0,5 °C)
+        case "16": bumpHeatSetpoint(0.5);       break
+        case "17": bumpHeatSetpoint(-0.5);      break
         case "18": toggleHeatMode();            break
-        case "19": setOutputById(12, true);     break  // Aux3 ON (id 12)
-        case "20": setOutputById(12, false);    break  // Aux3 OFF
+        case "19": setOutputById(12, true);     break
+        case "20": setOutputById(12, false);    break
         default:
             logWarn "Push ${pushed}: botão não mapeado"
     }
@@ -220,20 +225,125 @@ def push(pushed) {
 
 // === Novo comando toggleHeatMode ===
 def toggleHeatMode() {
-    // Pega o último estado conhecido
     String cur = device.currentValue("heat0Mode") ?: "Off"
-
-    String next
-    if (cur.equalsIgnoreCase("Automático")) {
-        next = "Ligado"
-    } else {
-        next = "Automático"
-    }
-
+    String next = cur.equalsIgnoreCase("Automático") ? "Ligado" : "Automático"
     logInfo "toggleHeatMode: alternando de ${cur} para ${next}"
     setHeatMode(next)
 }
 
+// ======== Luzes: comandos existentes ========
+
+/* def setLightBrightness(Number level) {
+    if (level == null) return
+    Integer v = Math.max(0, Math.min(100, (level as Integer)))
+    sendJson([command:"setDevice", argument:[leds:[led0:[brightness:v]]]])
+    // Otimista + eventos ColorControl
+    sendEvent(name:"lightBrightness", value: v)
+    sendEvent(name:"level", value: v)
+	sendEvent(name:"switch", value:"on")
+    pubParentAttr("lights", true)    
+    runIn(1, "getDevice")
+}
+*/
+
+def setLightBrightness(Number level) {
+    if (level == null) return
+    Integer v = Math.max(0, Math.min(100, (level as Integer)))
+
+    // Se brilho zero, trata como OFF; senão, ON.
+    boolean willOn = (v > 0)
+
+    sendJson([command:"setDevice", argument:[leds:[led0:[on:willOn, brightness:v]]]])
+
+    // Eventos otimistas para o tile:
+    sendEvent(name:"lightBrightness", value: v)
+    sendEvent(name:"level", value: v)
+    sendEvent(name:"switch", value: willOn ? "on" : "off")
+    pubParentAttr("lights", willOn)
+
+    runIn(1, "getDevice")
+}
+
+
+def chooseLightColor(String colorName) {
+    String key = (colorName ?: "").trim().toUpperCase()
+    List<Integer> rgb = PRESET_COLORS[key]
+    if (!rgb) { logWarn "chooseLightColor: cor inválida '${colorName}'"; return }
+    setLightRGB(rgb[0], rgb[1], rgb[2])
+}
+
+def setLightRGB(Number r, Number g, Number b) {
+    Integer R = clip255(r), G = clip255(g), B = clip255(b)
+    sendJson([command:"setDevice", argument:[leds:[led0:[on:true, color:[R,G,B], effect:255]]]])
+    pubParentAttr("lights", true)
+    sendEvent(name:"lightColorRGB", value: "${R},${G},${B}")
+    // Atualiza atributos ColorControl de forma otimista usando level atual (ou 100)
+    Integer lvl = (device.currentValue("lightBrightness") ?: device.currentValue("level") ?: 100) as Integer
+    Map hsv = rgbToHsv(R, G, B, lvl)
+    sendEvent(name:"hue", value: hsv.h)
+    sendEvent(name:"saturation", value: hsv.s)
+    sendEvent(name:"switch", value:"on")   // <— adiciona isto    
+    sendEvent(name:"color", value: rgbToHex(R,G,B))
+    if (lvl != null) sendEvent(name:"level", value: Math.max(0, Math.min(100, lvl)))
+    runIn(1, "getDevice")
+}
+
+private Integer clip255(def v) {
+    Integer x = (v == null) ? 0 : (v as Integer)
+    return Math.max(0, Math.min(255, x))
+}
+
+// ======== ColorControl (NOVO) ========
+
+def setColor(Map colorMap) {
+    if (!colorMap) return
+    BigDecimal h = (colorMap.hue ?: device.currentValue("hue") ?: 0) as BigDecimal   // 0..100
+    BigDecimal s = (colorMap.saturation ?: device.currentValue("saturation") ?: 0) as BigDecimal // 0..100
+    Integer    l = (colorMap.level ?: device.currentValue("level") ?: device.currentValue("lightBrightness") ?: 100) as Integer // 0..100
+
+    Map rgb = hsvToRgb(h, s, l)
+    // Define cor (mantém brightness coerente)
+    setLightRGB(rgb.r, rgb.g, rgb.b)
+    if (colorMap.containsKey("level")) {
+        setLightBrightness(l)
+    } else {
+        // garantir eventos coerentes
+        sendEvent(name:"hue", value: (h as BigDecimal))
+        sendEvent(name:"saturation", value: (s as BigDecimal))
+        sendEvent(name:"level", value: l)
+        sendEvent(name:"color", value: rgbToHex(rgb.r, rgb.g, rgb.b))
+    }
+}
+
+def setHue(Number h) {
+    BigDecimal H = (h ?: 0) as BigDecimal
+    BigDecimal S = (device.currentValue("saturation") ?: 100) as BigDecimal
+    Integer   L = (device.currentValue("level") ?: device.currentValue("lightBrightness") ?: 100) as Integer
+    Map rgb = hsvToRgb(H, S, L)
+    setLightRGB(rgb.r, rgb.g, rgb.b)
+    // manter brilho atual
+    sendEvent(name:"hue", value: H)
+    sendEvent(name:"saturation", value: S)
+    sendEvent(name:"level", value: L)
+    sendEvent(name:"color", value: rgbToHex(rgb.r, rgb.g, rgb.b))
+}
+
+def setSaturation(Number s) {
+    BigDecimal S = (s ?: 0) as BigDecimal
+    BigDecimal H = (device.currentValue("hue") ?: 0) as BigDecimal
+    Integer   L = (device.currentValue("level") ?: device.currentValue("lightBrightness") ?: 100) as Integer
+    Map rgb = hsvToRgb(H, S, L)
+    setLightRGB(rgb.r, rgb.g, rgb.b)
+    sendEvent(name:"hue", value: H)
+    sendEvent(name:"saturation", value: S)
+    sendEvent(name:"level", value: L)
+    sendEvent(name:"color", value: rgbToHex(rgb.r, rgb.g, rgb.b))
+}
+
+def setLevel(Number level) {
+    // brightness do ColorControl
+    setLightBrightness(level)
+}
 
 // ======== Escrita ========
 
@@ -241,10 +351,8 @@ private void setOutputById(Integer targetId, Boolean onVal) {
     Map last = state?.lastDevice ?: [:]
     Map outs = (last?.outputs ?: [:]) as Map
     if (!outs) {
-        // sem cache, forçamos leitura e tentamos depois
         logInfo "Outputs ainda não descobertos; pedindo getDevice antes de setOutputById(${targetId})."
         getDevice()
-        // tentativa cega: aplica em todos outN que tenham id == targetId no último cache (se vier logo depois)
     }
     Map argOutputs = [:]
     outs?.each { k, v ->
@@ -253,7 +361,6 @@ private void setOutputById(Integer targetId, Boolean onVal) {
         }
     }
     if (argOutputs.isEmpty()) {
-        // fallback: se não encontramos pelo cache, tentamos um chute comum (Filtro costuma ser out0; Aux 1/2 out1/out2)
         String guessKey = guessOutputKeyForId(targetId, outs)
         if (guessKey) {
             argOutputs[guessKey] = [on: onVal]
@@ -271,14 +378,11 @@ private void setOutputById(Integer targetId, Boolean onVal) {
     if (targetId == 12) pubParentAttr("aux3",   onVal)
 
     runIn(1, "getDevice")
-    
 }
 
 private String guessOutputKeyForId(Integer idVal, Map outs) {
-    // tenta achar outN por id
     String key = outs?.find { it?.value instanceof Map && it?.value?.id == idVal }?.key
     if (key) return key as String
-    // palpites comuns
     if (idVal == 0)  return "out0"
     if (idVal == 10) return "out1"
     if (idVal == 11) return "out2"
@@ -287,16 +391,16 @@ private String guessOutputKeyForId(Integer idVal, Map outs) {
 
 private void setLights(Boolean onVal) {
     sendJson([command: "setDevice", argument: [leds: [ led0: [ on: onVal ] ] ]])
-    pubParentAttr("lights", onVal)  // otimista
-    runIn(1, "getDevice")
+    pubParentAttr("lights", onVal)
+	sendEvent(name:"switch", value: onVal ? "on" : "off")
     
+    runIn(1, "getDevice")
 }
 
 // ======== Envio baixo nível ========
 
 private void sendJson(Map obj) {
     String js = JsonOutput.toJson(obj)
-    // Alguns firmwares aceitam sem delimitador; adicionar newline ajuda framing no lado do servidor.
     String payload = js + "\n"
     if (logEnable) log.debug "TX: ${js}"
     try {
@@ -309,12 +413,10 @@ private void sendJson(Map obj) {
 
 // ======== Socket callbacks ========
 
-// ======== Novo parse(String) para quando o Hubitat entregar texto ========
 def parse(String description) {
     if (logEnable) log.debug "RX (String): ${description}"
 
     String chunk
-    // Se a string parece HEX puro (ex.: 7B22636F...), decodifica p/ UTF-8.
     if (looksLikeHex(description)) {
         try {
             chunk = hexToUtf8(description)
@@ -323,21 +425,17 @@ def parse(String description) {
             return
         }
     } else {
-        // Caso venha JSON puro (com { } ), usa direto
         chunk = description
     }
 
     state.rxBuf = (state.rxBuf ?: "") + (chunk ?: "")
-    processBuffer()   // reaproveita seu framing por balanço de chaves
+    processBuffer()
 }
 
-// ======== (já existente) parse(List<Map>) continua valendo ========
-// void parse(List<Map> description) { ... }  // <-- mantenha o seu
+// void parse(List<Map> description) { ... }  // (mantido, se existir no seu base)
 
-// ======== Helpers para detectar/decodificar HEX ========
 private boolean looksLikeHex(String s) {
     if (!s) return false
-    // só dígitos hex e comprimento par (cada 2 chars = 1 byte)
     return (s ==~ /[0-9A-Fa-f]+/) && (s.length() % 2 == 0)
 }
 
@@ -349,12 +447,10 @@ private String hexToUtf8(String hex) {
     return new String(bytes, "UTF-8")
 }
 
-
 private void processBuffer() {
     String buf = state.rxBuf ?: ""
     if (!buf) return
 
-    // framing por balanço de chaves
     int level = 0
     int start = -1
     List<String> frames = []
@@ -371,17 +467,13 @@ private void processBuffer() {
             }
         }
     }
-    // mantém resto não-consumido
     if (level == 0) {
         state.rxBuf = ""
     } else {
-        // sobra parcial
         state.rxBuf = (start >= 0 ? buf.substring(start) : buf)
     }
 
-    frames.each { f ->
-        handleJsonFrame(f)
-    }
+    frames.each { f -> handleJsonFrame(f) }
 }
 
 private void handleJsonFrame(String jsonText) {
@@ -396,7 +488,6 @@ private void handleJsonFrame(String jsonText) {
     }
     if (!obj) return
 
-    // Respostas padrão têm "command" e "response"
     if (obj.command && obj.response instanceof Map) {
         Map resp = (Map) obj.response
         state.lastDevice = resp
@@ -404,7 +495,6 @@ private void handleJsonFrame(String jsonText) {
         return
     }
 
-    // Alguns firmwares podem ecoar setDevice no topo (sem 'response'), ou enviar 'getDevice' direto
     if (obj.id || obj.outputs || obj.leds || obj.heatings) {
         state.lastDevice = obj
         updateFromResponse(obj)
@@ -413,7 +503,7 @@ private void handleJsonFrame(String jsonText) {
 }
 
 private void updateFromResponse(Map resp) {
-    // --------- Children (como você já tinha) ----------
+    // --------- Children ----------
     Map outs = (resp.outputs ?: [:]) as Map
     outs.each { key, val ->
         if (!(val instanceof Map)) return
@@ -431,7 +521,8 @@ private void updateFromResponse(Map resp) {
             cd.updateDataValue("outputId", "${idVal}")
         }
         String ev = isOn ? "on" : "off"
-        componentUpdate(cd, ev)
+        componentUpdate(cd, ev)    
+        
     }
 
     Map leds = (resp.leds ?: [:]) as Map
@@ -447,21 +538,34 @@ private void updateFromResponse(Map resp) {
         }
         String ev = (led0.on == true) ? "on" : "off"
         componentUpdate(cd, ev)
+		sendEvent(name:"switch", value: ev)   // <— garante que o tile saia de “sending”
+
+        // --- Feedback no device pai (luzes) ---
+        if (led0.containsKey('on')) {
+            pubParentAttr("lights", (led0.on == true))
+        }
+        if (led0.containsKey('brightness')) {
+            Integer br = (led0.brightness as Integer)
+            sendEvent(name:"lightBrightness", value: br)
+            sendEvent(name:"level", value: br)
+        }
+        if (led0.containsKey('color') && led0.color instanceof List && led0.color.size() >= 3) {
+            Integer R = (led0.color[0] as Integer)
+            Integer G = (led0.color[1] as Integer)
+            Integer B = (led0.color[2] as Integer)
+            sendEvent(name:"lightColorRGB", value: "${R},${G},${B}")
+            sendEvent(name:"color", value: rgbToHex(R,G,B))
+            // Se não veio brightness, usa o atual para calcular HSV coerente
+            Integer lvl = (led0.brightness != null) ? (led0.brightness as Integer) : ((device.currentValue("level") ?: 100) as Integer)
+            Map hsv = rgbToHsv(R, G, B, lvl)
+            sendEvent(name:"hue", value: hsv.h)
+            sendEvent(name:"saturation", value: hsv.s)
+            if (lvl != null) sendEvent(name:"level", value: Math.max(0, Math.min(100, lvl)))
+        }
     }
 
-    // --------- NOVO: Atributos no device PAI ----------
-    // Luzes (led0)
-    if (led0?.containsKey('on')) {
-        pubParentAttr("lights", (led0.on == true))
-    }
-
-    // Filtro e Auxiliares 1..3 com base nos IDs
-    // IDs comuns: filtro=0, auxiliares=10,11,12 (ajuste aqui se o seu mapeamento for diferente)
-    Boolean fOn  = null
-    Boolean a1On = null
-    Boolean a2On = null
-    Boolean a3On = null
-
+    // --------- Filtro/Aux no pai ----------
+    Boolean fOn = null; Boolean a1On = null; Boolean a2On = null; Boolean a3On = null
     outs?.each { k, v ->
         if (!(v instanceof Map)) return
         Integer idVal = (v.id ?: -1) as Integer
@@ -473,7 +577,6 @@ private void updateFromResponse(Map resp) {
             case 12: a3On = isOn; break
         }
     }
-
     if (fOn  != null) pubParentAttr("filter", fOn)
     if (a1On != null) pubParentAttr("aux1",   a1On)
     if (a2On != null) pubParentAttr("aux2",   a2On)
@@ -482,11 +585,7 @@ private void updateFromResponse(Map resp) {
     // --------- Heatings (feedback) ----------
     Map heats = (resp.heatings ?: [:]) as Map
     Map heat0 = heats?.heat0 as Map
-    if (heat0) {
-        publishHeat0(heat0)
-    }
-
-    
+    if (heat0) { publishHeat0(heat0) }
 }
 
 private String nameForOutputId(Integer idVal) {
@@ -512,7 +611,6 @@ def componentOn(cd) {
     String ledKey = cd.getDataValue("ledKey")
     if (outKey) {
         sendJson([command:"setDevice", argument:[outputs:[(outKey):[on:true]]]])
-
         Integer idVal = cd.getDataValue("outputId")?.toInteger()
         if (idVal != null) {
             if (idVal == 0)  pubParentAttr("filter", true)
@@ -525,8 +623,8 @@ def componentOn(cd) {
     }
     if (ledKey) {
         sendJson([command:"setDevice", argument:[leds:[(ledKey):[on:true]]]])
-        // luzes
         pubParentAttr("lights", true)
+        sendEvent(name:"switch", value:"on")       // <—        
         runIn(1, "getDevice")
         return
     }
@@ -537,8 +635,6 @@ def componentOff(cd) {
     String ledKey = cd.getDataValue("ledKey")
     if (outKey) {
         sendJson([command:"setDevice", argument:[outputs:[(outKey):[on:false]]]])
-
-        // ✅ idem para OFF
         Integer idVal = cd.getDataValue("outputId")?.toInteger()
         if (idVal != null) {
             if (idVal == 0)  pubParentAttr("filter", false)
@@ -552,6 +648,7 @@ def componentOff(cd) {
     if (ledKey) {
         sendJson([command:"setDevice", argument:[leds:[(ledKey):[on:false]]]])
         pubParentAttr("lights", false)
+        sendEvent(name:"switch", value:"off")      // <—        
         runIn(1, "getDevice")
         return
     }
@@ -561,14 +658,12 @@ private void componentUpdate(cd, String ev) {
     try {
         cd.parse([[name:"switch", value:ev, descriptionText:"${cd.displayName} was turned ${ev}"]])
     } catch (ignored) {
-        // Fallback para setComponentStatus de drivers genéricos
         if (ev == "on") cd.sendEvent(name:"switch", value:"on") else cd.sendEvent(name:"switch", value:"off")
     }
 }
 
 def componentRefresh(cd) {
     if (logEnable) log.debug "Child pediu refresh: ${cd?.displayName}"
-    // Um único getDevice já atualiza todos os childs
     getDevice()
 }
 
@@ -583,51 +678,38 @@ def heatOn()  { setHeatingOnOff(true)  }
 def heatOff() { setHeatingOnOff(false) }
 
 private void setHeatingOnOff(boolean onVal) {
-    // pega contexto atual para decidir o modo
     Map last  = (state?.lastDevice ?: [:]) as Map
     Map heat0 = ((last.heatings ?: [:]) as Map)?.heat0 as Map
     Integer typeVal = (heat0?.type   instanceof Number) ? (heat0.type   as Integer) : null
     Integer curMode = (heat0?.opMode instanceof Number) ? (heat0.opMode as Integer) : null
 
-    // Se for ligar e o modo atual é 0 (Off) ou desconhecido, sobe para 1 (Ligado) por padrão.
-    // Se for desligar, força opMode=0.
     Integer newMode
     if (!onVal) {
-        newMode = 0 // Off
+        newMode = 0
     } else {
-        newMode = (curMode == null || curMode == 0) ? 1 : curMode // 1 = Ligado na maioria dos tipos de piscina
+        newMode = (curMode == null || curMode == 0) ? 1 : curMode
     }
 
-    // Envia on + opMode juntos
     sendJson([command:"setDevice", argument:[heatings:[heat0:[on:onVal, opMode:newMode]]]])
-
-    // publica otimista e confirma com getDevice
     sendEvent(name:"heat0On",   value: onVal ? "on" : "off")
     if (newMode != null) sendEvent(name:"heat0Mode", value: opModeLabel(newMode, typeVal))
     runIn(1, "getDevice")
 }
 
-
 def setHeatMode(String mode) {
     Integer idx = opModeIndexFromLabel(mode)
     if (idx == null) { log.warn "setHeatMode: modo inválido '${mode}'"; return }
-
-    // Liga se modo ≠ 0; desliga se 0
     boolean willOn = (idx != 0)
-
     sendJson([command:"setDevice", argument:[heatings:[heat0:[opMode:idx, on:willOn]]]])
-    // otimista
     sendEvent(name:"heat0Mode", value: opModeLabel(idx, null))
     sendEvent(name:"heat0On",   value: willOn ? "on" : "off")
     runIn(1, "getDevice")
 }
 
-
 def setHeatSetpoint(Number spC) {
     if (spC == null) return
     Integer raw = rawFromC(spC)
     sendJson([command:"setDevice", argument:[heatings:[heat0:[sp:raw]]]])
-    // publica otimista
     sendEvent(name:"heat0Setpoint", value: (spC as BigDecimal), unit:"°C")
     runIn(1, "getDevice")
 }
@@ -642,7 +724,6 @@ def bumpHeatSetpoint(Number deltaC) {
     BigDecimal target = (cur + (deltaC as BigDecimal))
     if (min != null) target = [target, min].max()
     if (max != null) target = [target, max].min()
-
     setHeatSetpoint(target)
 }
 
@@ -653,10 +734,9 @@ def heatUp1C() {
     BigDecimal min = cFromRaw(heat0?.minSp)
     BigDecimal max = cFromRaw(heat0?.maxSp)
 
-    BigDecimal target = cur + 1.0G   // +1,0 °C
+    BigDecimal target = cur + 1.0G
     if (min != null) target = [target, min].max()
     if (max != null) target = [target, max].min()
-
     setHeatSetpoint(target)
 }
 
@@ -667,32 +747,25 @@ def heatDown1C() {
     BigDecimal min = cFromRaw(heat0?.minSp)
     BigDecimal max = cFromRaw(heat0?.maxSp)
 
-    BigDecimal target = cur - 1.0G   // -1,0 °C
+    BigDecimal target = cur - 1.0G
     if (min != null) target = [target, min].max()
     if (max != null) target = [target, max].min()
-
     setHeatSetpoint(target)
 }
-
-
 
 // ======== Socket status ========
 
 void socketStatus(String message) {
-    // mensagens típicas: "send error: Broken pipe", "receive error: Stream closed"
     logWarn "socketStatus: ${message}"
-    // tenta reconectar depois de 5s
     runIn(5, "connectSocket")
 }
-
 
 // ======== Logging helpers ========
 
 private void logInfo(msg){ log.info "Tholz TCP: ${msg}" }
 private void logWarn(msg){ log.warn "Tholz TCP: ${msg}" }
 
-
-// ========  helpers ========
+// ======== helpers ========
 
 private void pubParentAttr(String name, boolean onVal) {
     String v = onVal ? "on" : "off"
@@ -701,36 +774,26 @@ private void pubParentAttr(String name, boolean onVal) {
 
 // ======== Heatings helpers ========
 
-// Conversão: docs e exemplos usam inteiros tipo 320 -> 32.0°C
 private BigDecimal cFromRaw(def v) {
     if (v == null) return null
-    // 0xAAAA (43690) indica erro de sensor
     if ((v instanceof Number) && v.intValue() == 0xAAAA) return null
-    // Conversão padrão 10: 320 => 32.0
     try { return (v as BigDecimal) / 10.0G } catch (ignored) { return null }
 }
 
-// Converte °C back -> inteiro (ex.: 32.0 => 320)
 private Integer rawFromC(def c) {
     if (c == null) return null
     BigDecimal val = (c as BigDecimal)
     return Math.round(val * 10.0G) as Integer
 }
 
-// Mapeamento genérico de opMode (índices) para rótulo legível.
-// A tabela depende do "type" do heating; aqui cobrimos os comuns.
 @Field Map OP_MODE_LABELS_DEFAULT = [
     0:"Off", 1:"Ligado", 2:"Automático", 3:"Econômico", 4:"Aquecer", 5:"Resfriar"
 ]
 
-
-// Resolve label do modo a partir do índice e (opcional) do type
 private String opModeLabel(Integer opMode, Integer typeVal) {
-    // Poderia personalizar por 'type' (ex.: Solar Residencial tem "Econômico").
     return OP_MODE_LABELS_DEFAULT.get(opMode, "Modo ${opMode}")
 }
 
-// Converte texto -> índice mais provável (aceita variações PT/EN)
 private Integer opModeIndexFromLabel(String label) {
     String x = (label ?: "").trim().toLowerCase()
     switch (x) {
@@ -741,14 +804,66 @@ private Integer opModeIndexFromLabel(String label) {
         case "aquecer": case "heat": return 4
         case "resfriar": case "cool": return 5
     }
-    // fallback: número?
     try { return Integer.parseInt(x) } catch (ignored) { return null }
+}
+
+// ======== Conversões HSV/RGB (para ColorControl) ========
+
+private Map hsvToRgb(BigDecimal hue, BigDecimal sat, Integer lvl) {
+    // Hubitat: hue/sat 0..100, level 0..100
+    float H = ((hue ?: 0) as BigDecimal).floatValue() * 3.6f              // 0..360
+    float S = Math.max(0f, Math.min(1f, ((sat ?: 0) as BigDecimal).floatValue() / 100f))
+    float V = Math.max(0f, Math.min(1f, ((lvl ?: 0) as Integer) / 100f))
+
+    float C = V * S
+    float X = C * (1 - Math.abs((H / 60f) % 2 - 1))
+    float m = V - C
+
+    float r1=0, g1=0, b1=0
+    if (H < 60)      { r1=C; g1=X; b1=0 }
+    else if (H <120){ r1=X; g1=C; b1=0 }
+    else if (H <180){ r1=0; g1=C; b1=X }
+    else if (H <240){ r1=0; g1=X; b1=C }
+    else if (H <300){ r1=X; g1=0; b1=C }
+    else            { r1=C; g1=0; b1=X }
+
+    int R = Math.round((r1 + m) * 255)
+    int G = Math.round((g1 + m) * 255)
+    int B = Math.round((b1 + m) * 255)
+    return [r:R, g:G, b:B]
+}
+
+private Map rgbToHsv(Integer R, Integer G, Integer B, Integer lvlOverride=null) {
+    float r = (R ?: 0) / 255f
+    float g = (G ?: 0) / 255f
+    float b = (B ?: 0) / 255f
+    float max = Math.max(r, Math.max(g,b))
+    float min = Math.min(r, Math.min(g,b))
+    float d = max - min
+
+    float H
+    if (d == 0) H = 0
+    else if (max == r) H = 60 * (((g - b) / d) % 6)
+    else if (max == g) H = 60 * (((b - r) / d) + 2)
+    else               H = 60 * (((r - g) / d) + 4)
+    if (H < 0) H += 360
+
+    float S = (max == 0) ? 0 : d / max
+    // V derivado do brilho (podemos preferir brightness do dispositivo)
+    Integer L = (lvlOverride != null) ? lvlOverride : Math.round(max * 100)
+
+    Integer h = Math.round(H / 3.6f)        // 0..100
+    Integer s = Math.round(S * 100)         // 0..100
+    return [h:h, s:s, l:L]
+}
+
+private String rgbToHex(int r, int g, int b) {
+    return String.format("#%02X%02X%02X", (r&0xFF), (g&0xFF), (b&0xFF))
 }
 
 // Publica atributos do heat0
 private void publishHeat0(Map h) {
     if (!(h instanceof Map)) return
-
     Integer typeVal = (h.type instanceof Number) ? (h.type as Integer) : null
     Integer op      = (h.opMode instanceof Number) ? (h.opMode as Integer) : null
     Boolean on      = (h.on == true)
@@ -756,7 +871,6 @@ private void publishHeat0(Map h) {
     BigDecimal t1   = cFromRaw(h.t1)
     BigDecimal t2   = cFromRaw(h.t2)
 
-    // Temp principal = o maior índice de t{n} presente; se só t1/t2, escolha o maior índice disponível
     BigDecimal tMain = null
     int maxIdx = -1
     h.each { k,v ->
@@ -772,7 +886,6 @@ private void publishHeat0(Map h) {
     }
     if (tMain!= null) sendEvent(name:"temperature", value: tMain, unit:"°C")
 
-
     if (op != null) sendEvent(name:"heat0Mode", value: opModeLabel(op, typeVal))
     sendEvent(name:"heat0On", value: on ? "on" : "off")
     if (sp   != null) sendEvent(name:"heat0Setpoint", value: sp, unit: "°C")
@@ -780,4 +893,3 @@ private void publishHeat0(Map h) {
     if (t2   != null) sendEvent(name:"heat0T2", value: t2, unit: "°C")
     if (tMain!= null) sendEvent(name:"heat0Temp", value: tMain, unit: "°C")
 }
-
